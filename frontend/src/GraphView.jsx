@@ -71,34 +71,45 @@ const stylesheet = [
   },
   {
     selector: 'node.dimmed',
-    style: {
-      opacity: 0.3,
-    }
+    style: { opacity: 0.3 }
   },
   {
     selector: 'edge.dimmed',
-    style: {
-      opacity: 0.3,
-    }
+    style: { opacity: 0.3 }
+  },
+  {
+    selector: 'node.hidden',
+    style: { display: 'none' }
+  },
+  {
+    selector: 'edge.hidden',
+    style: { display: 'none' }
+  },
+  {
+    selector: 'node.collapsed',
+    style: { display: 'none' }
+  },
+  {
+    selector: 'edge.collapsed',
+    style: { display: 'none' }
   }
 ];
 
-function GraphView({ elements, onNodeClick, highlightEdges, activeGraphId }) {
-  const cyRef = useRef(null);
+function GraphView({ elements, onNodeClick, highlightEdges, activeGraphId, onHideNode, cyRef }) {
+  const internalCyRef = useRef(null);
+  const collapsedRef = useRef(new Set());
 
   React.useEffect(() => {
-    if (!cyRef.current || !highlightEdges) return;
-    const cy = cyRef.current;
+    if (!internalCyRef.current || !highlightEdges) return;
+    const cy = internalCyRef.current;
 
     cy.elements().removeClass('path-highlight dimmed');
 
     if (highlightEdges.length === 0) return;
 
-    // Dim everything first
     cy.elements().addClass('dimmed');
 
     highlightEdges.forEach(edgeLabel => {
-      // Find edge node by label
       const edgeNode = cy.nodes().filter(n =>
         n.data('type') === 'edge' &&
         n.data('graphId') === activeGraphId &&
@@ -133,7 +144,9 @@ function GraphView({ elements, onNodeClick, highlightEdges, activeGraphId }) {
       }}
       style={{ width: '100%', height: '100vh' }}
       cy={(cy) => {
-        cyRef.current = cy;
+        internalCyRef.current = cy;
+        if (cyRef) cyRef.current = cy;
+
         cy.removeAllListeners();
 
         cy.on('add', 'node', (evt) => {
@@ -151,13 +164,48 @@ function GraphView({ elements, onNodeClick, highlightEdges, activeGraphId }) {
           cy.elements().removeClass('highlighted');
           node.connectedEdges().addClass('highlighted');
           node.connectedEdges().connectedNodes().addClass('highlighted');
-          if (onNodeClick) onNodeClick(node.id());
+          if (onNodeClick) onNodeClick(node.id(), node.data());
         });
 
         cy.on('tap', function(evt) {
           if (evt.target === cy) {
             cy.elements().removeClass('highlighted path-highlight dimmed');
-            if (onNodeClick) onNodeClick(null);
+            if (onNodeClick) onNodeClick(null, null);
+          }
+        });
+
+        // Right click — hide node and track for undo
+        cy.on('cxttap', 'node', (evt) => {
+          const node = evt.target;
+          const nodeId = node.id();
+          node.addClass('hidden');
+          node.connectedEdges().addClass('hidden');
+          if (onHideNode) onHideNode(nodeId);
+        });
+
+        // Double click — expand/collapse connected nodes + restore hidden ones
+        cy.on('dblclick', 'node[type = "element"]', (evt) => {
+          const node = evt.target;
+          const nodeId = node.id();
+
+          const connectedEdgeNodes = node.connectedEdges().connectedNodes()
+            .filter(n => n.data('type') === 'edge');
+
+          const connectedElements = connectedEdgeNodes
+            .union(connectedEdgeNodes.connectedEdges())
+            .union(connectedEdgeNodes.connectedEdges().connectedNodes())
+            .not(node);
+
+          if (collapsedRef.current.has(nodeId)) {
+            // Expand — show collapsed and restore hidden
+            connectedElements.removeClass('collapsed');
+            connectedElements.removeClass('hidden');
+            node.connectedEdges().removeClass('hidden');
+            collapsedRef.current.delete(nodeId);
+          } else {
+            // Collapse
+            connectedElements.addClass('collapsed');
+            collapsedRef.current.add(nodeId);
           }
         });
       }}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import GraphView from './GraphView';
 import Panel from './Panel';
 import axios from 'axios';
@@ -29,14 +29,18 @@ function App() {
   const [elements, setElements] = useState([]);
   const [status, setStatus] = useState('');
   const [selectedNode, setSelectedNode] = useState(null);
+  const [selectedNodeData, setSelectedNodeData] = useState(null);
   const [nodeEdges, setNodeEdges] = useState([]);
   const [highlightEdges, setHighlightEdges] = useState([]);
+  const historyRef = useRef([]); // action history for undo
+  const cyUndoRef = useRef(null); // ref to cy instance for undo hidden nodes
 
   const handleSetActiveGraph = (id) => {
     activeGraphIdRef.current = id;
     setActiveGraphId(id);
     setHighlightEdges([]);
     setSelectedNode(null);
+    setSelectedNodeData(null);
     setNodeEdges([]);
   };
 
@@ -50,6 +54,43 @@ function App() {
       refreshAllGraphs(graphs);
     }
   }, []);
+
+  // Ctrl+Z handler
+  const handleUndo = useCallback(async () => {
+    const history = historyRef.current;
+    if (history.length === 0) {
+      setStatus('Nothing to undo');
+      return;
+    }
+
+    const last = history[history.length - 1];
+    historyRef.current = history.slice(0, -1);
+
+    if (last.type === 'add_edge') {
+      await axios.delete(`${API}/metagraph/${last.graphId}/edge/${last.edgeId}`);
+      setStatus(`Undid: add edge ${last.edgeId}`);
+      await refreshAllGraphs(graphsRef.current);
+    } else if (last.type === 'hide_node') {
+      // Restore hidden node via cy ref
+      if (cyUndoRef.current) {
+        const cy = cyUndoRef.current;
+        cy.getElementById(last.nodeId).removeClass('hidden');
+        cy.getElementById(last.nodeId).connectedEdges().removeClass('hidden');
+      }
+      setStatus(`Undid: hide node ${last.nodeId}`);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        e.preventDefault();
+        handleUndo();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleUndo]);
 
   const refreshAllGraphs = async (graphList) => {
     if (graphList.length === 0) {
@@ -113,17 +154,19 @@ function App() {
     setElements([...allNodes.values(), ...allEdgeNodes, ...allEdgeLinks]);
   };
 
-  const handleNodeClick = async (nodeId) => {
+  const handleNodeClick = async (nodeId, nodeData) => {
     if (!nodeId || !activeGraphIdRef.current) {
       setSelectedNode(null);
+      setSelectedNodeData(null);
       setNodeEdges([]);
       return;
     }
+    setSelectedNode(nodeId);
+    setSelectedNodeData(nodeData);
     const res = await axios.get(`${API}/metagraph/${activeGraphIdRef.current}/edges`);
     const related = res.data.edges.filter(e =>
       e.invertex.includes(nodeId) || e.outvertex.includes(nodeId)
     );
-    setSelectedNode(nodeId);
     setNodeEdges(related);
   };
 
@@ -156,11 +199,23 @@ function App() {
   };
 
   const handleAddEdge = async (invertex, outvertex, label) => {
-    await axios.post(`${API}/metagraph/${activeGraphIdRef.current}/edge`, {
+    const res = await axios.post(`${API}/metagraph/${activeGraphIdRef.current}/edge`, {
       invertex, outvertex, label
     });
+    // Track in history
+    historyRef.current = [
+      ...historyRef.current,
+      { type: 'add_edge', graphId: activeGraphIdRef.current, edgeId: res.data.edge_id }
+    ];
     setStatus('Edge added');
     await refreshAllGraphs(graphsRef.current);
+  };
+
+  const handleHideNode = (nodeId) => {
+    historyRef.current = [
+      ...historyRef.current,
+      { type: 'hide_node', nodeId }
+    ];
   };
 
   const handleDelete = async () => {
@@ -170,9 +225,12 @@ function App() {
     handleSetActiveGraph(updated.length > 0 ? updated[0].id : null);
     setStatus('Metagraph deleted');
     setSelectedNode(null);
+    setSelectedNodeData(null);
     setNodeEdges([]);
     await refreshAllGraphs(updated);
   };
+
+  const activeGraph = graphs.find(g => g.id === activeGraphId);
 
   return (
     <div className="app">
@@ -208,10 +266,42 @@ function App() {
         />
 
         {status && <p className="status">{status}</p>}
+      </div>
 
-        {selectedNode && (
-          <div className="node-info">
-            <h3>Node: {selectedNode}</h3>
+      <div className="graph-area">
+        <div className="graph-hint">
+          Right click to hide · Double click to expand/collapse · Ctrl+Z to undo
+        </div>
+        <GraphView
+          elements={elements}
+          onNodeClick={handleNodeClick}
+          highlightEdges={highlightEdges}
+          activeGraphId={activeGraphId}
+          onHideNode={handleHideNode}
+          cyRef={cyUndoRef}
+        />
+      </div>
+
+      <div className="right-sidebar">
+        {selectedNode ? (
+          <>
+            <div className="node-header">
+              <div
+                className="node-color-dot"
+                style={{ background: activeGraph?.color || '#4F46E5' }}
+              />
+              <h3>{selectedNode}</h3>
+            </div>
+            <p className="node-meta">
+              Graph: <span>{activeGraph?.label || activeGraphId}</span>
+            </p>
+            <p className="node-meta">
+              ID: <span>{activeGraphId}</span>
+            </p>
+
+            <div className="divider" />
+
+            <h4>Connected Edges</h4>
             {nodeEdges.length === 0 ? (
               <p className="muted">No edges found</p>
             ) : (
@@ -222,16 +312,12 @@ function App() {
                 </div>
               ))
             )}
+          </>
+        ) : (
+          <div className="no-selection">
+            <p>Click a node to see its details</p>
           </div>
         )}
-      </div>
-      <div className="graph-area">
-        <GraphView
-          elements={elements}
-          onNodeClick={handleNodeClick}
-          highlightEdges={highlightEdges}
-          activeGraphId={activeGraphId}
-        />
       </div>
     </div>
   );

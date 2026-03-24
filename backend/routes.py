@@ -72,6 +72,16 @@ def get_metapaths(graph_id: str, req: MetapathRequest):
     return {"metapaths": paths}
 
 
+@router.delete("/metagraph/{graph_id}/edge/{edge_id}")
+def delete_edge(graph_id: str, edge_id: str):
+    mg = Metagraph(set(), graph_id=graph_id)
+    mg.graph.query(f"""
+        MATCH (me:MetagraphEdge {{id: '{edge_id}'}})
+        DETACH DELETE me
+    """)
+    return {"deleted": True, "edge_id": edge_id}
+
+
 @router.delete("/metagraph/{graph_id}")
 def delete_metagraph(graph_id: str):
     mg = Metagraph(set(), graph_id=graph_id)
@@ -81,7 +91,6 @@ def delete_metagraph(graph_id: str):
 
 @router.post("/multigraph")
 def get_multigraph(req: MultiGraphRequest):
-    """Returns all edges from multiple metagraphs combined."""
     result = []
     for graph_id in req.graph_ids:
         try:
