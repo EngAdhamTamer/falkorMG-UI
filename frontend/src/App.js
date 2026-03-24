@@ -32,8 +32,9 @@ function App() {
   const [selectedNodeData, setSelectedNodeData] = useState(null);
   const [nodeEdges, setNodeEdges] = useState([]);
   const [highlightEdges, setHighlightEdges] = useState([]);
-  const historyRef = useRef([]); // action history for undo
-  const cyUndoRef = useRef(null); // ref to cy instance for undo hidden nodes
+  const historyRef = useRef([]);
+  const redoRef = useRef([]);
+  const cyUndoRef = useRef(null);
 
   const handleSetActiveGraph = (id) => {
     activeGraphIdRef.current = id;
@@ -54,43 +55,6 @@ function App() {
       refreshAllGraphs(graphs);
     }
   }, []);
-
-  // Ctrl+Z handler
-  const handleUndo = useCallback(async () => {
-    const history = historyRef.current;
-    if (history.length === 0) {
-      setStatus('Nothing to undo');
-      return;
-    }
-
-    const last = history[history.length - 1];
-    historyRef.current = history.slice(0, -1);
-
-    if (last.type === 'add_edge') {
-      await axios.delete(`${API}/metagraph/${last.graphId}/edge/${last.edgeId}`);
-      setStatus(`Undid: add edge ${last.edgeId}`);
-      await refreshAllGraphs(graphsRef.current);
-    } else if (last.type === 'hide_node') {
-      // Restore hidden node via cy ref
-      if (cyUndoRef.current) {
-        const cy = cyUndoRef.current;
-        cy.getElementById(last.nodeId).removeClass('hidden');
-        cy.getElementById(last.nodeId).connectedEdges().removeClass('hidden');
-      }
-      setStatus(`Undid: hide node ${last.nodeId}`);
-    }
-  }, []);
-
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
-        e.preventDefault();
-        handleUndo();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndo]);
 
   const refreshAllGraphs = async (graphList) => {
     if (graphList.length === 0) {
@@ -154,6 +118,78 @@ function App() {
     setElements([...allNodes.values(), ...allEdgeNodes, ...allEdgeLinks]);
   };
 
+  // ── Undo ──────────────────────────────────────────────────────────────────
+  const handleUndo = useCallback(async () => {
+    const history = historyRef.current;
+    if (history.length === 0) {
+      setStatus('Nothing to undo');
+      return;
+    }
+
+    const last = history[history.length - 1];
+    historyRef.current = history.slice(0, -1);
+    redoRef.current = [...redoRef.current, last];
+
+    if (last.type === 'add_edge') {
+      await axios.delete(`${API}/metagraph/${last.graphId}/edge/${last.edgeId}`);
+      setStatus(`Undid: add edge ${last.edgeId}`);
+      await refreshAllGraphs(graphsRef.current);
+    } else if (last.type === 'hide_node') {
+      if (cyUndoRef.current) {
+        const cy = cyUndoRef.current;
+        cy.getElementById(last.nodeId).removeClass('hidden');
+        cy.getElementById(last.nodeId).connectedEdges().removeClass('hidden');
+      }
+      setStatus(`Undid: hide node ${last.nodeId}`);
+    }
+  }, []);
+
+  // ── Redo ──────────────────────────────────────────────────────────────────
+  const handleRedo = useCallback(async () => {
+    const redo = redoRef.current;
+    if (redo.length === 0) {
+      setStatus('Nothing to redo');
+      return;
+    }
+
+    const last = redo[redo.length - 1];
+    redoRef.current = redo.slice(0, -1);
+    historyRef.current = [...historyRef.current, last];
+
+    if (last.type === 'add_edge') {
+      const res = await axios.post(`${API}/metagraph/${last.graphId}/edge`, {
+        invertex: last.invertex,
+        outvertex: last.outvertex,
+        label: last.edgeId
+      });
+      setStatus(`Redid: add edge ${res.data.edge_id}`);
+      await refreshAllGraphs(graphsRef.current);
+    } else if (last.type === 'hide_node') {
+      if (cyUndoRef.current) {
+        const cy = cyUndoRef.current;
+        cy.getElementById(last.nodeId).addClass('hidden');
+        cy.getElementById(last.nodeId).connectedEdges().addClass('hidden');
+      }
+      setStatus(`Redid: hide node ${last.nodeId}`);
+    }
+  }, []);
+
+  // ── Keyboard shortcuts ────────────────────────────────────────────────────
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        e.preventDefault();
+        handleUndo();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleUndo, handleRedo]);
+
   const handleNodeClick = async (nodeId, nodeData) => {
     if (!nodeId || !activeGraphIdRef.current) {
       setSelectedNode(null);
@@ -202,11 +238,17 @@ function App() {
     const res = await axios.post(`${API}/metagraph/${activeGraphIdRef.current}/edge`, {
       invertex, outvertex, label
     });
-    // Track in history
     historyRef.current = [
       ...historyRef.current,
-      { type: 'add_edge', graphId: activeGraphIdRef.current, edgeId: res.data.edge_id }
+      {
+        type: 'add_edge',
+        graphId: activeGraphIdRef.current,
+        edgeId: res.data.edge_id,
+        invertex,
+        outvertex
+      }
     ];
+    redoRef.current = []; // clear redo on new action
     setStatus('Edge added');
     await refreshAllGraphs(graphsRef.current);
   };
@@ -216,6 +258,7 @@ function App() {
       ...historyRef.current,
       { type: 'hide_node', nodeId }
     ];
+    redoRef.current = []; // clear redo on new action
   };
 
   const handleDelete = async () => {
@@ -270,7 +313,7 @@ function App() {
 
       <div className="graph-area">
         <div className="graph-hint">
-          Right click to hide · Double click to expand/collapse · Ctrl+Z to undo
+          Right click to hide · Double click to expand/collapse · Ctrl+Z to undo · Ctrl+Y to redo
         </div>
         <GraphView
           elements={elements}

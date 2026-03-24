@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useEffect } from 'react';
 import CytoscapeComponent from 'react-cytoscapejs';
 
 const stylesheet = [
@@ -41,10 +41,7 @@ const stylesheet = [
   },
   {
     selector: 'node.highlighted',
-    style: {
-      'border-width': 3,
-      'border-color': '#fff',
-    }
+    style: { 'border-width': 3, 'border-color': '#fff' }
   },
   {
     selector: 'edge.highlighted',
@@ -56,10 +53,7 @@ const stylesheet = [
   },
   {
     selector: 'node.path-highlight',
-    style: {
-      'border-width': 3,
-      'border-color': '#22C55E',
-    }
+    style: { 'border-width': 3, 'border-color': '#22C55E' }
   },
   {
     selector: 'edge.path-highlight',
@@ -95,11 +89,53 @@ const stylesheet = [
   }
 ];
 
+const LAYOUT = {
+  name: 'cose',
+  animate: true,
+  animationDuration: 500,
+  nodeRepulsion: 15000,
+  idealEdgeLength: 150,
+  edgeElasticity: 200,
+  nestingFactor: 5,
+  gravity: 10,
+  numIter: 2000,
+  initialTemp: 500,
+  coolingFactor: 0.95,
+  minTemp: 1.0,
+  randomize: true,
+  fit: true,
+  padding: 50
+};
+
 function GraphView({ elements, onNodeClick, highlightEdges, activeGraphId, onHideNode, cyRef }) {
   const internalCyRef = useRef(null);
   const collapsedRef = useRef(new Set());
+  const prevElementCountRef = useRef(0);
 
-  React.useEffect(() => {
+  // Only run layout when number of elements changes (new node/edge added)
+  useEffect(() => {
+    const cy = internalCyRef.current;
+    if (!cy) return;
+
+    const currentCount = elements.length;
+    if (currentCount !== prevElementCountRef.current) {
+      prevElementCountRef.current = currentCount;
+      cy.layout(LAYOUT).run();
+
+      // Reapply colors after layout
+      cy.nodes().forEach(node => {
+        if (node.data('color')) {
+          node.style('background-color', node.data('color'));
+        }
+        if (node.data('borderColor')) {
+          node.style('border-color', node.data('borderColor'));
+        }
+      });
+    }
+  }, [elements]);
+
+  // Path highlighting
+  useEffect(() => {
     if (!internalCyRef.current || !highlightEdges) return;
     const cy = internalCyRef.current;
 
@@ -128,36 +164,13 @@ function GraphView({ elements, onNodeClick, highlightEdges, activeGraphId, onHid
     <CytoscapeComponent
       elements={elements}
       stylesheet={stylesheet}
-      layout={{
-        name: 'cose',
-        animate: true,
-        animationDuration: 500,
-        nodeRepulsion: 8000,
-        idealEdgeLength: 100,
-        edgeElasticity: 100,
-        nestingFactor: 5,
-        gravity: 80,
-        numIter: 1000,
-        initialTemp: 200,
-        coolingFactor: 0.95,
-        minTemp: 1.0
-      }}
+      layout={{ name: 'preset' }}
       style={{ width: '100%', height: '100vh' }}
       cy={(cy) => {
         internalCyRef.current = cy;
         if (cyRef) cyRef.current = cy;
 
         cy.removeAllListeners();
-
-        cy.on('add', 'node', (evt) => {
-          const node = evt.target;
-          if (node.data('color')) {
-            node.style('background-color', node.data('color'));
-          }
-          if (node.data('borderColor')) {
-            node.style('border-color', node.data('borderColor'));
-          }
-        });
 
         cy.on('tap', 'node[type = "element"]', (evt) => {
           const node = evt.target;
@@ -174,7 +187,6 @@ function GraphView({ elements, onNodeClick, highlightEdges, activeGraphId, onHid
           }
         });
 
-        // Right click — hide node and track for undo
         cy.on('cxttap', 'node', (evt) => {
           const node = evt.target;
           const nodeId = node.id();
@@ -183,7 +195,6 @@ function GraphView({ elements, onNodeClick, highlightEdges, activeGraphId, onHid
           if (onHideNode) onHideNode(nodeId);
         });
 
-        // Double click — expand/collapse connected nodes + restore hidden ones
         cy.on('dblclick', 'node[type = "element"]', (evt) => {
           const node = evt.target;
           const nodeId = node.id();
@@ -197,13 +208,11 @@ function GraphView({ elements, onNodeClick, highlightEdges, activeGraphId, onHid
             .not(node);
 
           if (collapsedRef.current.has(nodeId)) {
-            // Expand — show collapsed and restore hidden
             connectedElements.removeClass('collapsed');
             connectedElements.removeClass('hidden');
             node.connectedEdges().removeClass('hidden');
             collapsedRef.current.delete(nodeId);
           } else {
-            // Collapse
             connectedElements.addClass('collapsed');
             collapsedRef.current.add(nodeId);
           }
