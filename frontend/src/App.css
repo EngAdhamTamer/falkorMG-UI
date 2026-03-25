@@ -25,6 +25,25 @@ body {
   flex-direction: column;
   gap: 20px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #334155 #1E293B;
+}
+
+.sidebar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+  background: #1E293B;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover {
+  background: #475569;
 }
 
 .sidebar h2 {
@@ -114,6 +133,7 @@ button.danger:hover {
   padding: 4px 12px;
   border-radius: 20px;
   pointer-events: none;
+  white-space: nowrap;
 }
 
 /* Right Sidebar */
@@ -127,6 +147,25 @@ button.danger:hover {
   gap: 12px;
   overflow-y: auto;
   border-left: 1px solid #334155;
+  scrollbar-width: thin;
+  scrollbar-color: #334155 #1E293B;
+}
+
+.right-sidebar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.right-sidebar::-webkit-scrollbar-track {
+  background: #1E293B;
+}
+
+.right-sidebar::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+
+.right-sidebar::-webkit-scrollbar-thumb:hover {
+  background: #475569;
 }
 
 .node-header {
@@ -271,6 +310,21 @@ button.danger:hover {
 .matrix-scroll {
   overflow-x: auto;
   margin-top: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: #334155 #0F172A;
+}
+
+.matrix-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+
+.matrix-scroll::-webkit-scrollbar-track {
+  background: #0F172A;
+}
+
+.matrix-scroll::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
 }
 
 .matrix {
@@ -293,6 +347,8 @@ button.danger:hover {
 .row-label {
   color: #94A3B8;
   font-weight: bold;
+  white-space: nowrap;
+  padding-right: 8px;
 }
 
 .cell-one {
