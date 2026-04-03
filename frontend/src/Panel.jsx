@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 
-const API = 'http://localhost:8000';
+const API = 'http://100.103.196.14:8001';
 
 function Panel({ graphId, onCreate, onAddEdge, onDelete, onRefresh, onLoad, onHighlightPath }) {
   const [genSet, setGenSet] = useState('');
@@ -17,6 +17,12 @@ function Panel({ graphId, onCreate, onAddEdge, onDelete, onRefresh, onLoad, onHi
   const [showAdjacency, setShowAdjacency] = useState(false);
   const [showClosure, setShowClosure] = useState(false);
   const [selectedPath, setSelectedPath] = useState(null);
+
+  // NLP state
+  const [nlpText, setNlpText] = useState('');
+  const [nlpResult, setNlpResult] = useState(null);
+  const [nlpLoading, setNlpLoading] = useState(false);
+  const [nlpError, setNlpError] = useState('');
 
   const handleCreate = () => {
     const items = genSet.split(',').map(s => s.trim()).filter(Boolean);
@@ -66,6 +72,33 @@ function Panel({ graphId, onCreate, onAddEdge, onDelete, onRefresh, onLoad, onHi
     setShowClosure(true);
     setShowAdjacency(false);
   };
+
+  const handleNlpAnalyze = async () => {
+    if (!nlpText.trim()) return;
+    setNlpLoading(true);
+    setNlpError('');
+    setNlpResult(null);
+    try {
+      const res = await axios.post(`${API}/nlp/analyze`, { text: nlpText });
+      setNlpResult(res.data);
+    } catch (err) {
+      setNlpError('Analysis failed: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setNlpLoading(false);
+    }
+  };
+
+  const POS_COLORS = {
+    NOUN: '#4F46E5',
+    VERB: '#059669',
+    ADJ: '#D97706',
+    ADV: '#7C3AED',
+    PROPN: '#0891B2',
+    NUM: '#DC2626',
+    PUNCT: '#475569',
+  };
+
+  const getPosColor = (pos) => POS_COLORS[pos] || '#334155';
 
   return (
     <div className="panel">
@@ -204,10 +237,94 @@ function Panel({ graphId, onCreate, onAddEdge, onDelete, onRefresh, onLoad, onHi
 
           <div className="section">
             <button onClick={onRefresh}>Refresh Graph</button>
-            <button className="danger" onClick={onDelete}>Delete Metagraph</button>
+            <button className="danger" onClick={onDelete}>Remove from View</button>
           </div>
         </>
       )}
+
+      {/* NLP Section */}
+      <div className="section">
+        <h3>NLP Pipeline</h3>
+        <textarea
+          className="nlp-input"
+          placeholder="Type a sentence to analyze..."
+          value={nlpText}
+          onChange={e => setNlpText(e.target.value)}
+          rows={3}
+        />
+        <button onClick={handleNlpAnalyze} disabled={nlpLoading}>
+          {nlpLoading ? 'Analyzing...' : 'Analyze'}
+        </button>
+
+        {nlpError && <p className="nlp-error">{nlpError}</p>}
+
+        {nlpResult && (
+          <div className="nlp-results">
+
+            {/* Tokens + POS */}
+            {nlpResult.tokens && (
+              <div className="nlp-card">
+                <p className="result-title">Tokens & POS Tags</p>
+                <div className="nlp-tokens">
+                  {nlpResult.tokens.filter(tok => tok.pos !== 'SPACE').map((tok, i) => (
+                    <div key={i} className="nlp-token">
+                      <span className="nlp-token-text">{tok.text}</span>
+                      <span
+                        className="nlp-token-pos"
+                        style={{ background: getPosColor(tok.pos) }}
+                      >
+                        {tok.pos}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Lemmas */}
+            {nlpResult.tokens && (
+              <div className="nlp-card">
+                <p className="result-title">Lemmas</p>
+                <div className="nlp-tokens">
+                  {nlpResult.tokens.filter(tok => tok.pos !== 'SPACE').map((tok, i) => (
+                    tok.lemma !== tok.text.toLowerCase() ? (
+                      <div key={i} className="nlp-token">
+                        <span className="nlp-token-text">{tok.text}</span>
+                        <span className="nlp-token-lemma">→ {tok.lemma}</span>
+                      </div>
+                    ) : null
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Named Entities */}
+            {nlpResult.entities && nlpResult.entities.length > 0 && (
+              <div className="nlp-card">
+                <p className="result-title">Named Entities</p>
+                {nlpResult.entities.map((ent, i) => (
+                  <div key={i} className="nlp-entity">
+                    <span className="nlp-entity-text">{ent.text}</span>
+                    <span className="nlp-entity-label">{ent.label}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Sentences */}
+            {nlpResult.sentences && nlpResult.sentences.length > 1 && (
+              <div className="nlp-card">
+                <p className="result-title">Sentences ({nlpResult.sentences.length})</p>
+                {nlpResult.sentences.map((s, i) => (
+                  <p key={i} className="nlp-sentence">{i + 1}. {s}</p>
+                ))}
+              </div>
+            )}
+
+          </div>
+        )}
+      </div>
+
     </div>
   );
 }

@@ -2,10 +2,20 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 import sys
-sys.path.append(r"C:\falkorMG_lib")
+import redis as redis_client
+
+sys.path.append("/home/sanmyaku/falkorMG_lib")
 from falkorMG import Metagraph
 
 router = APIRouter()
+
+# ── Graph Names ───────────────────────────────────────────────────────────────
+
+GRAPH_NAMES = {
+    '5831c01b': 'DOLCE',
+    '7e319e3f': 'OntoWordNet',
+    'wordnet_full': 'WordNet',
+}
 
 # ── Models ────────────────────────────────────────────────────────────────────
 
@@ -25,6 +35,22 @@ class MultiGraphRequest(BaseModel):
     graph_ids: List[str]
 
 # ── Routes ────────────────────────────────────────────────────────────────────
+
+@router.get("/graphs")
+def list_graphs():
+    try:
+        r = redis_client.Redis(host='localhost', port=6379)
+        graphs = r.execute_command('GRAPH.LIST')
+        graph_ids = [g.decode() if isinstance(g, bytes) else g for g in graphs]
+        return {
+            "graphs": [
+                {"id": gid, "name": GRAPH_NAMES.get(gid, gid)}
+                for gid in graph_ids
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/metagraph")
 def create_metagraph(req: CreateMetagraphRequest):

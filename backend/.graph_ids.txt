@@ -1,0 +1,5 @@
+DUL (DOLCE+DnS Ultralite): ff59342e
+OntoWordNet mapping: 95487b6c
+WordNet 500-synset sample: e37b1281
+DOLCE-Lite: a18fc4b7
+65d41ca8: empty test graph (ignore)

@@ -65,11 +65,11 @@ const stylesheet = [
   },
   {
     selector: 'node.dimmed',
-    style: { opacity: 0.3 }
+    style: { opacity: 0.15 }
   },
   {
     selector: 'edge.dimmed',
-    style: { opacity: 0.3 }
+    style: { opacity: 0.15 }
   },
   {
     selector: 'node.hidden',
@@ -89,30 +89,21 @@ const stylesheet = [
   }
 ];
 
-const LAYOUT = {
-  name: 'cose',
-  animate: true,
-  animationDuration: 500,
-  nodeRepulsion: 15000,
-  idealEdgeLength: 150,
-  edgeElasticity: 200,
-  nestingFactor: 5,
-  gravity: 10,
-  numIter: 2000,
-  initialTemp: 500,
-  coolingFactor: 0.95,
-  minTemp: 1.0,
-  randomize: true,
-  fit: true,
-  padding: 50
-};
+// Quadrant origins for up to 6 graphs — each graph starts in its own region
+const GRAPH_ORIGINS = [
+  { x: -1200, y: -600 },
+  { x:  1200, y: -600 },
+  { x: -1200, y:  600 },
+  { x:  1200, y:  600 },
+  { x:     0, y: -1200 },
+  { x:     0, y:  1200 },
+];
 
 function GraphView({ elements, onNodeClick, highlightEdges, activeGraphId, onHideNode, cyRef }) {
   const internalCyRef = useRef(null);
   const collapsedRef = useRef(new Set());
   const prevElementCountRef = useRef(0);
 
-  // Only run layout when number of elements changes (new node/edge added)
   useEffect(() => {
     const cy = internalCyRef.current;
     if (!cy) return;
@@ -120,7 +111,48 @@ function GraphView({ elements, onNodeClick, highlightEdges, activeGraphId, onHid
     const currentCount = elements.length;
     if (currentCount !== prevElementCountRef.current) {
       prevElementCountRef.current = currentCount;
-      cy.layout(LAYOUT).run();
+
+      // Collect unique graph IDs in order of appearance
+      const graphIdOrder = [];
+      cy.nodes().forEach(node => {
+        const gid = node.data('graphId');
+        if (gid && !graphIdOrder.includes(gid)) graphIdOrder.push(gid);
+      });
+
+      // Pre-position each graph's nodes around its assigned quadrant origin
+      graphIdOrder.forEach((gid, idx) => {
+        const origin = GRAPH_ORIGINS[idx % GRAPH_ORIGINS.length];
+        const nodes = cy.nodes().filter(n => n.data('graphId') === gid);
+        const spread = Math.max(300, Math.sqrt(nodes.length) * 60);
+        nodes.forEach((node, i) => {
+          const angle = (2 * Math.PI * i) / nodes.length;
+          const r = spread * (0.3 + 0.7 * (i / nodes.length));
+          node.position({
+            x: origin.x + r * Math.cos(angle),
+            y: origin.y + r * Math.sin(angle),
+          });
+        });
+      });
+
+      // Run cose from these pre-set positions (randomize: false respects them)
+      cy.layout({
+        name: 'cose',
+        animate: true,
+        animationDuration: 600,
+        nodeRepulsion: 20000,
+        idealEdgeLength: 120,
+        edgeElasticity: 150,
+        nestingFactor: 5,
+        gravity: 3,
+        numIter: 1500,
+        initialTemp: 300,
+        coolingFactor: 0.95,
+        minTemp: 1.0,
+        randomize: false,
+        fit: true,
+        padding: 80,
+        componentSpacing: 400,
+      }).run();
 
       // Reapply colors after layout
       cy.nodes().forEach(node => {
@@ -174,9 +206,15 @@ function GraphView({ elements, onNodeClick, highlightEdges, activeGraphId, onHid
 
         cy.on('tap', 'node[type = "element"]', (evt) => {
           const node = evt.target;
-          cy.elements().removeClass('highlighted');
-          node.connectedEdges().addClass('highlighted');
-          node.connectedEdges().connectedNodes().addClass('highlighted');
+          cy.elements().removeClass('highlighted dimmed');
+
+          const connected = node.connectedEdges()
+            .union(node.connectedEdges().connectedNodes())
+            .union(node);
+
+          cy.elements().not(connected).addClass('dimmed');
+          connected.addClass('highlighted');
+
           if (onNodeClick) onNodeClick(node.id(), node.data());
         });
 

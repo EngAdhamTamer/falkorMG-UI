@@ -4,7 +4,7 @@ import Panel from './Panel';
 import axios from 'axios';
 import './App.css';
 
-const API = 'http://localhost:8000';
+const API = 'http://100.103.196.14:8001';
 
 const GRAPH_COLORS = [
   '#4F46E5', '#059669', '#DC2626', '#D97706', '#7C3AED', '#0891B2'
@@ -35,6 +35,8 @@ function App() {
   const historyRef = useRef([]);
   const redoRef = useRef([]);
   const cyUndoRef = useRef(null);
+  const [editingGraphId, setEditingGraphId] = useState(null);
+  const [availableGraphs, setAvailableGraphs] = useState([]);
 
   const handleSetActiveGraph = (id) => {
     activeGraphIdRef.current = id;
@@ -54,7 +56,9 @@ function App() {
     if (graphs.length > 0) {
       refreshAllGraphs(graphs);
     }
-  }, []);
+    axios.get(`${API}/graphs`).then(res => setAvailableGraphs(res.data.graphs || []))
+      .catch(() => setAvailableGraphs([]));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refreshAllGraphs = async (graphList) => {
     if (graphList.length === 0) {
@@ -62,60 +66,65 @@ function App() {
       return;
     }
 
-    const res = await axios.post(`${API}/multigraph`, {
-      graph_ids: graphList.map(g => g.id)
-    });
+    try {
+      const res = await axios.post(`${API}/multigraph`, {
+        graph_ids: graphList.map(g => g.id)
+      });
 
-    const allNodes = new Map();
-    const allEdgeNodes = [];
-    const allEdgeLinks = [];
+      const allNodes = new Map();
+      const allEdgeNodes = [];
+      const allEdgeLinks = [];
 
-    res.data.graphs.forEach((graph) => {
-      const color = graphList.find(g => g.id === graph.graph_id)?.color || '#4F46E5';
+      res.data.graphs.forEach((graph) => {
+        const color = graphList.find(g => g.id === graph.graph_id)?.color || '#4F46E5';
 
-      graph.edges.forEach(e => {
-        e.invertex.forEach(n => {
-          if (!allNodes.has(n)) {
-            allNodes.set(n, {
-              data: { id: n, label: n, type: 'element', graphId: graph.graph_id, color }
-            });
-          }
-        });
-        e.outvertex.forEach(n => {
-          if (!allNodes.has(n)) {
-            allNodes.set(n, {
-              data: { id: n, label: n, type: 'element', graphId: graph.graph_id, color }
-            });
-          }
-        });
-
-        const midId = `edge_${graph.graph_id}_${e.edge_id}`;
-        allEdgeNodes.push({
-          data: {
-            id: midId,
-            label: e.label || e.edge_id,
-            type: 'edge',
-            graphId: graph.graph_id,
-            borderColor: color,
-            color
-          }
-        });
-
-        e.invertex.forEach((n, i) => {
-          allEdgeLinks.push({
-            data: { id: `in_${graph.graph_id}_${e.edge_id}_${i}`, source: n, target: midId }
+        graph.edges.forEach(e => {
+          e.invertex.forEach(n => {
+            if (!allNodes.has(n)) {
+              allNodes.set(n, {
+                data: { id: n, label: n, type: 'element', graphId: graph.graph_id, color }
+              });
+            }
           });
-        });
+          e.outvertex.forEach(n => {
+            if (!allNodes.has(n)) {
+              allNodes.set(n, {
+                data: { id: n, label: n, type: 'element', graphId: graph.graph_id, color }
+              });
+            }
+          });
 
-        e.outvertex.forEach((n, i) => {
-          allEdgeLinks.push({
-            data: { id: `out_${graph.graph_id}_${e.edge_id}_${i}`, source: midId, target: n }
+          const midId = `edge_${graph.graph_id}_${e.edge_id}`;
+          allEdgeNodes.push({
+            data: {
+              id: midId,
+              label: e.label || e.edge_id,
+              type: 'edge',
+              graphId: graph.graph_id,
+              borderColor: color,
+              color
+            }
+          });
+
+          e.invertex.forEach((n, i) => {
+            allEdgeLinks.push({
+              data: { id: `in_${graph.graph_id}_${e.edge_id}_${i}`, source: n, target: midId }
+            });
+          });
+
+          e.outvertex.forEach((n, i) => {
+            allEdgeLinks.push({
+              data: { id: `out_${graph.graph_id}_${e.edge_id}_${i}`, source: midId, target: n }
+            });
           });
         });
       });
-    });
 
-    setElements([...allNodes.values(), ...allEdgeNodes, ...allEdgeLinks]);
+      setElements([...allNodes.values(), ...allEdgeNodes, ...allEdgeLinks]);
+      setStatus(`Loaded ${res.data.graphs.length} graph(s)`);
+    } catch (err) {
+      setStatus(`Error loading graphs: ${err.message}`);
+    }
   };
 
   // ── Undo ──────────────────────────────────────────────────────────────────
@@ -142,7 +151,7 @@ function App() {
       }
       setStatus(`Undid: hide node ${last.nodeId}`);
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Redo ──────────────────────────────────────────────────────────────────
   const handleRedo = useCallback(async () => {
@@ -172,7 +181,7 @@ function App() {
       }
       setStatus(`Redid: hide node ${last.nodeId}`);
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
   useEffect(() => {
@@ -219,14 +228,15 @@ function App() {
     await refreshAllGraphs(updated);
   };
 
-  const handleLoad = async (graphId) => {
+  const handleLoad = async (graphId, name) => {
     if (graphsRef.current.find(g => g.id === graphId)) {
       handleSetActiveGraph(graphId);
       setStatus(`Switched to: ${graphId}`);
+      await refreshAllGraphs(graphsRef.current);
       return;
     }
     const color = GRAPH_COLORS[graphsRef.current.length % GRAPH_COLORS.length];
-    const newGraph = { id: graphId, label: `Graph ${graphsRef.current.length + 1}`, color };
+    const newGraph = { id: graphId, label: name || `Graph ${graphsRef.current.length + 1}`, color };
     const updated = [...graphsRef.current, newGraph];
     setGraphs(updated);
     handleSetActiveGraph(graphId);
@@ -248,7 +258,7 @@ function App() {
         outvertex
       }
     ];
-    redoRef.current = []; // clear redo on new action
+    redoRef.current = [];
     setStatus('Edge added');
     await refreshAllGraphs(graphsRef.current);
   };
@@ -258,15 +268,14 @@ function App() {
       ...historyRef.current,
       { type: 'hide_node', nodeId }
     ];
-    redoRef.current = []; // clear redo on new action
+    redoRef.current = [];
   };
 
   const handleDelete = async () => {
-    await axios.delete(`${API}/metagraph/${activeGraphIdRef.current}`);
     const updated = graphsRef.current.filter(g => g.id !== activeGraphIdRef.current);
     setGraphs(updated);
     handleSetActiveGraph(updated.length > 0 ? updated[0].id : null);
-    setStatus('Metagraph deleted');
+    setStatus('Removed from view');
     setSelectedNode(null);
     setSelectedNodeData(null);
     setNodeEdges([]);
@@ -291,12 +300,58 @@ function App() {
                 onClick={() => handleSetActiveGraph(g.id)}
               >
                 <span className="dot" style={{ background: g.color }} />
-                {g.label}
-                <span className="graph-id">{g.id}</span>
+                {editingGraphId === g.id ? (
+                  <input
+                    className="graph-rename-input"
+                    defaultValue={g.label}
+                    autoFocus
+                    onClick={e => e.stopPropagation()}
+                    onBlur={e => {
+                      const val = e.target.value.trim();
+                      if (val) setGraphs(prev => prev.map(x => x.id === g.id ? { ...x, label: val } : x));
+                      setEditingGraphId(null);
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') e.target.blur();
+                      if (e.key === 'Escape') setEditingGraphId(null);
+                    }}
+                  />
+                ) : (
+                  <div className="graph-tag-label">
+                    <span onDoubleClick={e => { e.stopPropagation(); setEditingGraphId(g.id); }}>
+                      {g.label}
+                    </span>
+                    <span className="graph-id">{g.id}</span>
+                  </div>
+                )}
               </div>
             ))}
           </div>
         )}
+
+        <div className="section">
+          <h3>Load Existing</h3>
+          <select
+            className="graph-select"
+            defaultValue=""
+            onChange={e => {
+              const id = e.target.value;
+              if (!id) return;
+              const graph = availableGraphs.find(g => g.id === id);
+              const defaultName = graph?.name || id;
+              const name = window.prompt('Name for this graph:', defaultName);
+              if (name === null) { e.target.value = ''; return; }
+              handleLoad(id, name || defaultName);
+              e.target.value = '';
+            }}
+          >
+            <option value="" disabled>Select a graph...</option>
+            {availableGraphs.map(g => {
+              const loaded = graphs.find(x => x.id === g.id);
+              return <option key={g.id} value={g.id}>{loaded ? `${loaded.label} (${g.id})` : g.name}</option>;
+            })}
+          </select>
+        </div>
 
         <Panel
           graphId={activeGraphId}
@@ -348,12 +403,19 @@ function App() {
             {nodeEdges.length === 0 ? (
               <p className="muted">No edges found</p>
             ) : (
-              nodeEdges.map(e => (
-                <div className="edge-card" key={e.edge_id}>
-                  <span className="edge-label">{e.label || e.edge_id}</span>
-                  <p>{e.invertex.join(', ')} → {e.outvertex.join(', ')}</p>
-                </div>
-              ))
+              (() => {
+                const grouped = nodeEdges.reduce((acc, e) => {
+                  const key = e.label || e.edge_id;
+                  acc[key] = (acc[key] || 0) + 1;
+                  return acc;
+                }, {});
+                return Object.entries(grouped).map(([label, count]) => (
+                  <div className="edge-card" key={label}>
+                    <span className="edge-label">{label}</span>
+                    <p className="edge-count">× {count} connection{count > 1 ? 's' : ''}</p>
+                  </div>
+                ));
+              })()
             )}
           </>
         ) : (
