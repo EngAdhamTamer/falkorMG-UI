@@ -9,14 +9,6 @@ from falkorMG import Metagraph
 
 router = APIRouter()
 
-# ── Graph Names ───────────────────────────────────────────────────────────────
-
-GRAPH_NAMES = {
-    '5831c01b': 'DOLCE',
-    '7e319e3f': 'OntoWordNet',
-    'wordnet_full': 'WordNet',
-}
-
 # ── Models ────────────────────────────────────────────────────────────────────
 
 class CreateMetagraphRequest(BaseModel):
@@ -35,6 +27,12 @@ class MultiGraphRequest(BaseModel):
     graph_ids: List[str]
 
 # ── Routes ────────────────────────────────────────────────────────────────────
+
+GRAPH_NAMES = {
+    '99e7c5e6': 'DOLCE',
+    '5bbfa898': 'OntoWordNet',
+    'wordnet_full': 'WordNet',
+}
 
 @router.get("/graphs")
 def list_graphs():

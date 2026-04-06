@@ -1,7 +1,7 @@
 import requests
 from rdflib import Graph, OWL, RDFS, RDF
-API = "http://localhost:8000"
-OWL_FILE = r"C:\falkorMG-ui\backend\dul.owl"
+API = "http://localhost:8001"
+OWL_FILE = "/home/sanmyaku/falkorMG-ui/backend/dul.owl"
 
 def local_name(uri):
     uri = str(uri)

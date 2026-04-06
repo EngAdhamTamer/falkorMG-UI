@@ -1,99 +1,54 @@
-import gzip
 import requests
-import xml.etree.ElementTree as ET
-from collections import deque
+from rdflib import Graph
+API = "http://localhost:8001"
+TTL_FILE = "/home/sanmyaku/falkorMG-ui/backend/english-wordnet-2024.ttl"
 
-API = "http://localhost:8000"
-WN_FILE = r"C:\falkorMG-ui\backend\wordnet.xml.gz"
-ROOT_SYNSET = "oewn-00001740-n"
-MAX_SYNSETS = 500
-
-def extract_label(members_str):
-    # Take first member, strip prefix and POS suffix
-    first = members_str.strip().split()[0]
-    # e.g. oewn-physical_entity-n -> physical_entity
-    parts = first.replace("oewn-", "").rsplit("-", 1)
-    return parts[0].replace("_", " ")
+def local_name(uri):
+    uri = str(uri)
+    return uri.split("#")[-1].split("/")[-1]
 
 def main():
-    print("Parsing WordNet XML...")
-    with gzip.open(WN_FILE, "rt", encoding="utf-8") as f:
-        tree = ET.parse(f)
-    root = tree.getroot()
+    print("Parsing WordNet TTL...")
+    g = Graph()
+    g.parse(TTL_FILE, format="turtle")
+    print(f"Loaded {len(g)} triples")
 
-    # Build synset map: id -> label, and hypernym adjacency
-    synsets = {}    # id -> label
-    hypernyms = {}  # id -> list of parent ids
+    nodes = set()
+    edges = []
 
-    for synset in root.iter("Synset"):
-        sid = synset.get("id")
-        pos = synset.get("partOfSpeech")
-        members = synset.get("members", "")
-        if pos != "n" or not members:
-            continue
-        label = extract_label(members)
-        synsets[sid] = label
-        hypernyms[sid] = []
-        for rel in synset:
-            if rel.get("relType") == "hypernym":
-                hypernyms[sid].append(rel.get("target"))
+    for s, p, o in g:
+        s_name = local_name(s)
+        p_name = local_name(p)
+        o_name = local_name(o)
+        if s_name and o_name and s_name != o_name:
+            nodes.add(s_name)
+            nodes.add(o_name)
+            edges.append((s_name, o_name, p_name))
 
-    print(f"Total noun synsets: {len(synsets)}")
+    print(f"Unique nodes: {len(nodes)}, Edges: {len(edges)}")
 
-    # BFS from root, cap at MAX_SYNSETS
-    # Build reverse map: parent -> children
-    children = {sid: [] for sid in synsets}
-    for sid, parents in hypernyms.items():
-        for p in parents:
-            if p in children:
-                children[p].append(sid)
-
-    visited = set()
-    queue = deque([ROOT_SYNSET])
-    order = []
-    while queue and len(visited) < MAX_SYNSETS:
-        sid = queue.popleft()
-        if sid in visited or sid not in synsets:
-            continue
-        visited.add(sid)
-        order.append(sid)
-        for child in children.get(sid, []):
-            if child not in visited:
-                queue.append(child)
-
-    print(f"BFS selected {len(visited)} synsets")
-
-    # Collect generator set (all unique labels)
-    gen_set = list({synsets[sid] for sid in visited})
-
-    # Create metagraph
-    resp = requests.post(f"{API}/metagraph", json={"generator_set": gen_set})
+    resp = requests.post(f"{API}/metagraph", json={"generator_set": list(nodes)})
     resp.raise_for_status()
     graph_id = resp.json()["id"]
     print(f"Created metagraph: {graph_id}")
 
-    # Add hypernym edges within our visited set
     count = 0
-    for sid in visited:
-        child_label = synsets[sid]
-        for parent_id in hypernyms.get(sid, []):
-            if parent_id not in visited:
-                continue
-            parent_label = synsets[parent_id]
-            if child_label == parent_label:
-                continue
-            r = requests.post(f"{API}/metagraph/{graph_id}/edge", json={
-                "invertex": [child_label],
-                "outvertex": [parent_label],
-                "label": "hypernym"
-            })
-            if r.status_code == 200:
-                count += 1
-            else:
-                print(f"  WARN: {child_label} -> {parent_label}: {r.text}")
+    failed = 0
+    for i, (inv, out, label) in enumerate(edges):
+        r = requests.post(f"{API}/metagraph/{graph_id}/edge", json={
+            "invertex": [inv],
+            "outvertex": [out],
+            "label": label
+        })
+        if r.status_code == 200:
+            count += 1
+        else:
+            failed += 1
+        if i % 10000 == 0:
+            print(f"  Progress: {i}/{len(edges)} ({failed} failed)")
 
-    print(f"Loaded {count} edges into graph '{graph_id}'")
-    print(f"Done! Graph ID: {graph_id}")
+    print(f"Done! Loaded {count} edges, {failed} failed")
+    print(f"Graph ID to save: {graph_id}")
 
 if __name__ == "__main__":
     main()

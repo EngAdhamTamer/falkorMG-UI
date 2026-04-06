@@ -1,7 +1,7 @@
 import requests
 from rdflib import Graph, OWL, RDFS, RDF, URIRef
-API = "http://localhost:8000"
-OWL_FILE = r"C:\falkorMG-ui\backend\ontowordnet.owl"
+API = "http://localhost:8001"
+OWL_FILE = "/home/sanmyaku/falkorMG-ui/backend/ontowordnet.owl"
 DOLCE_NS = "http://www.loa-cnr.it/ontologies/DOLCE-Lite.owl#"
 
 def local_name(uri):
